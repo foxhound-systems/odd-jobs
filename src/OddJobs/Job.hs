@@ -563,7 +563,7 @@ jobPoller = do
   forever $ do
     concurencyPolicy <- withResource pool concurrencyControlFn
     case concurencyPolicy of
-      DontPoll -> log LevelWarn $ LogText "NOT polling the job queue due to concurrency control"
+      DontPoll -> log LevelDebug $ LogText "NOT polling the job queue due to concurrency control"
       PollAny -> void $ pollRunJob processName Nothing
       PollWithResources resCfg -> void $ pollRunJob processName (Just resCfg)
 
