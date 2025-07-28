@@ -100,7 +100,8 @@ tests appPool jobPool = testGroup "All tests"
                                ]
                              , testResourceLimitedScheduling appPool jobPool
                              , testKillJob appPool jobPool
-                             ]
+                             ],
+    testUpdateInSelectBug appPool jobPool
   -- , testGroup "property tests" [ testEverything appPool jobPool
   --                              -- , propFilterJobs appPool jobPool
   --                              ]
@@ -689,6 +690,16 @@ data JobEvent = JobStart
               | JobSuccess
               | JobFailed
               deriving (Eq, Show)
+
+testUpdateInSelectBug appPool jobPool = testCase "Polling query should return the correct number of rows" $
+    withRandomTable jobPool $ \tname ->
+    Pool.withResource appPool $ \conn -> do
+        _ <- Job.createJob conn tname (PayloadSucceed 0)
+        _ <- PGS.execute conn "VACUUM ANALYZE ?;" (Only tname)
+        _ <- Job.createJob conn tname (PayloadSucceed 0)
+        Pool.withResource jobPool $ \jobConn -> do
+            r <- Job.jobPollingIO jobConn "fake-process" tname 10
+            assertEqual "Number of jobs returned by polling query" 1 (length r)
 
 -- testEverything appPool jobPool = testProperty "test everything" $ property $ do
 
