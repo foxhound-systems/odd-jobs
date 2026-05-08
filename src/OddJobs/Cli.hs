@@ -2,6 +2,7 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE CPP #-}
 module OddJobs.Cli where
 
 import Options.Applicative as Opts
@@ -9,7 +10,11 @@ import Control.Concurrent.Async (race)
 import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar, tryTakeMVar)
 import Data.Coerce (coerce)
 import Data.Functor (void)
+#if MIN_VERSION_text(2,1,2)
+import Data.Text hiding (show)
+#else
 import Data.Text
+#endif
 import OddJobs.Job (startJobRunner, Config(..), LogLevel(..), LogEvent(..))
 import OddJobs.Types (UIConfig(..), Seconds(..), delaySeconds)
 import qualified System.Posix.Daemonize as Daemonize

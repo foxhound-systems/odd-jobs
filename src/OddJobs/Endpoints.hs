@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeOperators, DeriveGeneric, NamedFieldPuns, DataKinds, StandaloneDeriving, FlexibleContexts, RecordWildCards, RankNTypes #-}
+{-# LANGUAGE TypeOperators, DeriveGeneric, NamedFieldPuns, DataKinds, StandaloneDeriving, FlexibleContexts, RecordWildCards, RankNTypes, CPP #-}
 
 
 -- | TODO: Rename this to OddJobs.Servant
@@ -19,7 +19,11 @@ import Servant.HTML.Lucid
 import Lucid
 import Lucid.Html5
 import Lucid.Base
+#if MIN_VERSION_text(2,1,2)
+import Data.Text as T hiding (show)
+#else
 import Data.Text as T
+#endif
 import Network.Wai.Handler.Warp   (run)
 import Servant.Server.StaticFiles (serveDirectoryFileServer)
 import UnliftIO hiding (Handler)

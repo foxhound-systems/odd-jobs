@@ -85,7 +85,11 @@ where
 import OddJobs.Types
 import qualified Data.Pool as Pool
 import Data.Pool(Pool)
+#if MIN_VERSION_text(2,1,2)
+import Data.Text as T hiding (show)
+#else
 import Data.Text as T
+#endif
 import Database.PostgreSQL.Simple as PGS
 import Database.PostgreSQL.Simple.Notification
 import UnliftIO.Async hiding (poll)
