@@ -85,11 +85,7 @@ where
 import OddJobs.Types
 import qualified Data.Pool as Pool
 import Data.Pool(Pool)
-#if MIN_VERSION_text(2,1,2)
-import Data.Text as T hiding (show)
-#else
-import Data.Text as T
-#endif
+import qualified Data.Text as T
 import Database.PostgreSQL.Simple as PGS
 import Database.PostgreSQL.Simple.Notification
 import UnliftIO.Async hiding (poll)
@@ -188,7 +184,7 @@ data RunnerEnv = RunnerEnv
 
 type RunnerM = ReaderT RunnerEnv IO
 
-logCallbackErrors :: (HasJobRunner m) => JobId -> Text -> m () -> m ()
+logCallbackErrors :: (HasJobRunner m) => JobId -> T.Text -> m () -> m ()
 logCallbackErrors jid msg action = catchAny action $ \e -> log LevelError $ LogText $ msg <> " Job ID=" <> toS (show jid) <> ": " <> toS (show e)
 
 instance HasJobRunner RunnerM where
@@ -463,7 +459,7 @@ killJob jid = do
       log LevelError $ LogText $ "Unable to find job in db to kill, jobId = " <> toS (show jid)
 
 -- TODO: This might have a resource leak.
-restartUponCrash :: (HasJobRunner m, Show a) => Text -> m a -> m ()
+restartUponCrash :: (HasJobRunner m, Show a) => T.Text -> m a -> m ()
 restartUponCrash name_ action = do
   a <- async action
   finally (waitCatch a >>= fn) $ do
@@ -777,7 +773,7 @@ scheduleJob :: ToJSON p
             -> UTCTime      -- ^ when should the job be executed
             -> IO Job
 scheduleJob conn tname payload runAt = do
-  let args = ( tname, runAt, Queued, toJSON payload, Nothing :: Maybe Value, 0 :: Int, Nothing :: Maybe Text, Nothing :: Maybe Text )
+  let args = ( tname, runAt, Queued, toJSON payload, Nothing :: Maybe Value, 0 :: Int, Nothing :: Maybe T.Text, Nothing :: Maybe T.Text )
       queryFormatter = toS <$> PGS.formatQuery conn createJobQuery args
   rs <- PGS.query conn createJobQuery args
   case rs of
@@ -812,7 +808,7 @@ scheduleJobWithResources conn tname ResourceCfg{..} payload resources runAt = do
   -- We insert everything in a single transaction to delay @NOTIFY@ calls,
   -- so a job isn't picked up before its resources are inserted.
   PGS.begin conn
-  let args = ( tname, runAt, Queued, toJSON payload, Nothing :: Maybe Value, 0 :: Int, Nothing :: Maybe Text, Nothing :: Maybe Text )
+  let args = ( tname, runAt, Queued, toJSON payload, Nothing :: Maybe Value, 0 :: Int, Nothing :: Maybe T.Text, Nothing :: Maybe T.Text )
       queryFormatter = toS <$> PGS.formatQuery conn createJobQuery args
   rs <- PGS.query conn createJobQuery args
 
@@ -864,7 +860,7 @@ throwParsePayloadWith parser job =
 -- job-types. Ref: 'cfgAllJobTypes'
 fetchAllJobTypes :: (MonadIO m)
                  => UIConfig
-                 -> m [Text]
+                 -> m [T.Text]
 fetchAllJobTypes UIConfig{uicfgAllJobTypes, uicfgDbPool} = liftIO $ do
   case uicfgAllJobTypes of
     AJTFixed jts -> pure jts
