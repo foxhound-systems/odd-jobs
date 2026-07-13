@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.4
+
+- Ensure polling queries update and return at most one job.
+- Enforce concurrency limits while worker threads are starting.
+- Correct the notification trigger channel so LISTEN/NOTIFY receives new jobs.
+- Pace the poller while concurrency control prevents new work.
+- Support the compatible `async` 2.2 release series.
+
 ## 0.2.3
 + Upgrade resource pool
 + Add ability to kill jobs

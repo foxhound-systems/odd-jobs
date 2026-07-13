@@ -15,20 +15,20 @@ module OddJobs.Job.Query
   )
 where
 
-import Database.PostgreSQL.Simple(Query)
-import Data.String
+import           Data.String
+import           Database.PostgreSQL.Simple ( Query )
 
 -- | Ref: 'jobPoller'
 jobPollingSql :: Query
 jobPollingSql =
   "update ? set status = ?, locked_at = ?, locked_by = ?, attempts=attempts+1 \
-  \ WHERE id in (select id from ? where (run_at<=? AND ((status in ?) OR (status = ? and locked_at<?))) \
+  \ WHERE id = (select id from ? where (run_at<=? AND ((status in ?) OR (status = ? and locked_at<?))) \
   \ ORDER BY attempts ASC, run_at ASC LIMIT 1 FOR UPDATE) RETURNING id"
 
 jobPollingWithResourceSql :: Query
 jobPollingWithResourceSql =
   " UPDATE ? SET status = ?, locked_at = ?, locked_by = ?, attempts = attempts + 1 \
-  \ WHERE id in (select id from ? where (run_at<=? AND ((status in ?) OR (status = ? and locked_at<?))) \
+  \ WHERE id = (select id from ? where (run_at<=? AND ((status in ?) OR (status = ? and locked_at<?))) \
   \ AND ?(id) \
   \ ORDER BY attempts ASC, run_at ASC LIMIT 1) \
   \ RETURNING id"
@@ -37,7 +37,7 @@ jobPollingWithResourceSql =
 killJobPollingSql :: Query
 killJobPollingSql =
   "UPDATE ? SET locked_at = NULL, locked_by = NULL \
-  \ WHERE id IN (SELECT id FROM ? WHERE status = ? AND locked_by = ? AND locked_at <= ? \
+  \ WHERE id = (SELECT id FROM ? WHERE status = ? AND locked_by = ? AND locked_at <= ? \
   \ ORDER BY locked_at ASC LIMIT 1 FOR UPDATE \
   \ ) RETURNING id"
 

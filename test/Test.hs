@@ -1,54 +1,66 @@
-{-# LANGUAGE FlexibleInstances, NamedFieldPuns, DeriveGeneric, FlexibleContexts, TypeFamilies, StandaloneDeriving, RankNTypes #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP                   #-}
+{-# LANGUAGE DeriveGeneric         #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE PartialTypeSignatures #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE RecordWildCards       #-}
+{-# LANGUAGE StandaloneDeriving    #-}
+{-# LANGUAGE TypeFamilies          #-}
 {-# OPTIONS_GHC -Wno-missing-signatures -Wno-partial-type-signatures #-}
 module Test where
 
-import Control.Monad.Trans.Control
-import Test.Tasty as Tasty
-import qualified OddJobs.Migrations as Migrations
-import qualified OddJobs.Job as Job
-import Database.PostgreSQL.Simple as PGS
-import Data.Functor (void)
-import Data.Pool as Pool
-import Test.Tasty.HUnit
-import Debug.Trace
+import           Control.Monad.Trans.Control
+import           Data.Functor                ( void )
+import           Data.Pool                   as Pool
+import           Database.PostgreSQL.Simple  as PGS
+import           Debug.Trace
+import qualified OddJobs.Job                 as Job
+import qualified OddJobs.Migrations          as Migrations
+import           Test.Tasty                  as Tasty
+import           Test.Tasty.HUnit
 -- import Control.Exception.Lifted (finally, catch, bracket)
-import Control.Monad (void, forM, forM_, replicateM, when)
-import Control.Monad.Logger
-import Control.Monad.Reader
-import Data.Aeson as Aeson
-import Data.Aeson.TH as Aeson
+import           Control.Monad               ( forM, forM_, replicateM, void,
+                                               when )
+import           Control.Monad.Logger
+import           Control.Monad.Reader
+import           Data.Aeson                  as Aeson
+import           Data.Aeson.TH               as Aeson
 -- import Control.Concurrent.Lifted
 -- import Control.Concurrent.Async.Lifted
-import OddJobs.Job (Job(..), JobId, delaySeconds, Seconds(..))
-import System.Log.FastLogger ( fromLogStr, withFastLogger, LogType'(..)
-                             , defaultBufSize, FastLogger, FileLogSpec(..), newTimedFastLogger
-                             , withTimedFastLogger)
-import System.Log.FastLogger.Date (newTimeCache, simpleTimeFormat')
-import Data.String.Conv (toS)
-import Data.Time
-import GHC.Generics
-import Hedgehog
-import qualified Hedgehog.Gen as Gen
-import qualified Hedgehog.Range as Range
-import Test.Tasty.Hedgehog
-import qualified System.Random as R
-import Data.String (fromString)
-import qualified Data.IntMap.Strict as Map
-import Control.Monad.Morph (hoist)
-import Data.List as DL
-import OddJobs.Web as Web
-import qualified Data.Time.Convenience as Time
-import qualified Data.Text as T
-import Data.Ord (comparing, Down(..))
-import Data.Maybe (fromMaybe)
-import qualified OddJobs.ConfigBuilder as Job
-import UnliftIO
-import Control.Exception (ArithException)
-import Data.Bifunctor(first)
-import System.Environment (lookupEnv)
+import           Control.Exception           ( ArithException )
+import           Control.Monad.Morph         ( hoist )
+import           Data.Bifunctor              ( first )
+import qualified Data.IntMap.Strict          as Map
+import           Data.List                   as DL
+import           Data.Maybe                  ( fromMaybe )
+import           Data.Ord                    ( Down (..), comparing )
+import           Data.String                 ( fromString )
+import           Data.String.Conv            ( toS )
+import qualified Data.Text                   as T
+import           Data.Time
+import qualified Data.Time.Convenience       as Time
+import           GHC.Generics
+import           Hedgehog
+import qualified Hedgehog.Gen                as Gen
+import qualified Hedgehog.Range              as Range
+import qualified OddJobs.ConfigBuilder       as Job
+import           OddJobs.Job                 ( Job (..), JobId, Seconds (..),
+                                               delaySeconds )
+import           OddJobs.Web                 as Web
+import           System.Environment          ( lookupEnv )
+import           System.Log.FastLogger       ( FastLogger, FileLogSpec (..),
+                                               LogType' (..), defaultBufSize,
+                                               fromLogStr, newTimedFastLogger,
+                                               withFastLogger,
+                                               withTimedFastLogger )
+import           System.Log.FastLogger.Date  ( newTimeCache, simpleTimeFormat' )
+import qualified System.Random               as R
+import qualified System.Timeout              as Timeout
+import           Test.Tasty.Hedgehog
+import           UnliftIO
+import           UnliftIO.Concurrent         ( threadDelay )
 
 $(Aeson.deriveJSON Aeson.defaultOptions ''Seconds)
 
@@ -100,6 +112,13 @@ tests appPool jobPool = testGroup "All tests"
                                ]
                              , testResourceLimitedScheduling appPool jobPool
                              , testKillJob appPool jobPool
+                             , testPollingReturnsOneJob jobPool
+                             , testPollerConcurrencyStartup appPool jobPool
+                             , testJobStartFailureDoesNotBlock jobPool
+                             , testJobSetupFailureDoesNotBlock jobPool
+                             , testDontPollPacing jobPool
+                             , testListenNotifyStartup appPool jobPool
+                             , testPollerListenerConcurrency appPool jobPool
                              ]
   -- , testGroup "property tests" [ testEverything appPool jobPool
   --                              -- , propFilterJobs appPool jobPool
@@ -170,16 +189,16 @@ instance FromJSON JobPayload where
 
 logEventToJob :: Job.LogEvent -> Maybe Job.Job
 logEventToJob le = case le of
-  Job.LogJobStart j -> Just j
-  Job.LogJobSuccess j _ -> Just j
+  Job.LogJobStart j        -> Just j
+  Job.LogJobSuccess j _    -> Just j
   Job.LogJobFailed j _ _ _ -> Just j
-  Job.LogJobTimeout j -> Just j
-  Job.LogKillJobSuccess j -> Just j
-  Job.LogKillJobFailed j -> Just j
-  Job.LogPoll -> Nothing
-  Job.LogDeletionPoll _ -> Nothing
-  Job.LogWebUIRequest -> Nothing
-  Job.LogText _ -> Nothing
+  Job.LogJobTimeout j      -> Just j
+  Job.LogKillJobSuccess j  -> Just j
+  Job.LogKillJobFailed j   -> Just j
+  Job.LogPoll              -> Nothing
+  Job.LogDeletionPoll _    -> Nothing
+  Job.LogWebUIRequest      -> Nothing
+  Job.LogText _            -> Nothing
 
 assertJobIdStatus :: HasCallStack
                   => Connection
@@ -247,6 +266,20 @@ ensureJobId conn tname jid = Job.findJobByIdIO conn tname jid >>= \case
   Nothing -> error $ "Not expecting job to be deleted. JobId=" <> show jid
   Just j -> pure j
 
+waitWithin :: String -> Int -> IO a -> IO a
+waitWithin message timeoutMicros action =
+  Timeout.timeout timeoutMicros action >>= \case
+    Nothing -> assertFailure message
+    Just result -> pure result
+
+waitUntil :: String -> IO Bool -> IO ()
+waitUntil message predicate =
+  waitWithin message 3000000 loop
+  where
+    loop = predicate >>= \case
+      True -> pure ()
+      False -> threadDelay 10000 >> loop
+
 withRandomTable :: (MonadBaseControl
                           IO m, MonadUnliftIO m) => Pool Connection -> (Job.TableName -> m a) -> m a
 withRandomTable jobPool action = do
@@ -282,7 +315,7 @@ runSingleJobFromQueue config' = do
 readResourceConfig :: Job.Config -> Maybe Job.ResourceCfg
 readResourceConfig cfg = case Job.cfgConcurrencyControl cfg of
   Job.ResourceLimits res -> Just res
-  _ -> Nothing
+  _                      -> Nothing
 
 withRandomResourceTables :: (MonadBaseControl IO m, MonadUnliftIO m) => Int -> Pool Connection -> Job.TableName -> (Job.ResourceCfg -> m a) -> m a
 withRandomResourceTables defaultLimit jobPool tname action = do
@@ -684,6 +717,257 @@ testKillJob appPool jobPool = testCase "killing a ongoing job" $ do
 
       assertJobIdStatus conn tname logRef "Job is cancelled and the job thread should be killed" Job.Cancelled jid
 
+testPollingReturnsOneJob jobPool = testCase "polling updates and returns only one job" $
+  withRandomTable jobPool $ \tname ->
+    Pool.withResource jobPool $ \conn -> do
+      _ <- Job.createJob conn tname (PayloadSucceed 0)
+      _ <- PGS.execute conn "VACUUM ANALYZE ?;" (Only tname)
+      _ <- Job.createJob conn tname (PayloadSucceed 0)
+      rows <- Job.jobPollingIO conn "single-row-regression" tname 10
+      assertEqual "Polling must lock exactly one job" 1 (DL.length rows)
+
+testPollerConcurrencyStartup appPool jobPool = testCase "poller counts workers while they are starting" $
+  withRandomTable jobPool $ \tname -> do
+    firstStarted <- newEmptyMVar
+    secondStarted <- newEmptyMVar
+    releaseFirst <- newEmptyMVar
+    startedCount <- newIORef (0 :: Int)
+    threadsRef <- newIORef mempty
+    let blockingRunner _ = do
+          started <- atomicModifyIORef' startedCount $ \n -> let next = n + 1 in (next, next)
+          if started == 1
+            then putMVar firstStarted () >> takeMVar releaseFirst
+            else void $ tryPutMVar secondStarted ()
+        configure cfg = cfg
+          { Job.cfgConcurrencyControl = Job.MaxConcurrentJobs 1
+          , Job.cfgImmediateJobDeletion = const $ pure False
+          , Job.cfgJobRunner = blockingRunner
+          , Job.cfgPollingInterval = 1
+          }
+
+    (firstJob, secondJob) <- Pool.withResource appPool $ \conn ->
+      (,) <$> Job.createJob conn tname (PayloadSucceed 0)
+          <*> Job.createJob conn tname (PayloadSucceed 0)
+
+    withConfig tname jobPool configure $ \_ cfg -> do
+      let monitorEnv = Job.RunnerEnv cfg threadsRef
+      withAsync (runReaderT Job.jobPoller monitorEnv) $ \_ ->
+        flip finally (void $ tryPutMVar releaseFirst ()) $ do
+          waitWithin "The first job did not start" 3000000 $ takeMVar firstStarted
+          threadDelay 100000
+          tryReadMVar secondStarted >>= assertEqual
+            "A second job started before the first worker was registered"
+            Nothing
+          putMVar releaseFirst ()
+          waitWithin "The second job did not start after capacity became available" 3000000 $
+            takeMVar secondStarted
+          Pool.withResource appPool $ \conn ->
+            waitUntil "The concurrency-test jobs did not finish" $ do
+              firstStatus <- Job.jobStatus <$> ensureJobId conn tname (Job.jobId firstJob)
+              secondStatus <- Job.jobStatus <$> ensureJobId conn tname (Job.jobId secondJob)
+              pure $ firstStatus == Job.Success && secondStatus == Job.Success
+
+testJobStartFailureDoesNotBlock jobPool = testCase "a failing onJobStart callback does not block polling" $
+  withRandomTable jobPool $ \tname ->
+    Pool.withResource jobPool $ \conn -> do
+      Job{jobId} <- Job.createJob conn tname (PayloadSucceed 0)
+      threadsRef <- newIORef mempty
+      withConfig tname jobPool configure $ \_ cfg -> do
+        let monitorEnv = Job.RunnerEnv cfg threadsRef
+        started <- waitWithin "pollRunJob deadlocked after onJobStart failed" 3000000 $
+          runReaderT (Job.pollRunJob "callback-failure-regression" Nothing) monitorEnv
+        case started of
+          Nothing -> assertFailure "Expected pollRunJob to find the queued job"
+          Just jobThread -> do
+            result <- waitCatch jobThread
+            assertBool "The worker should continue after logging the callback failure" $ case result of
+              Left _  -> False
+              Right _ -> True
+        Job{jobStatus} <- ensureJobId conn tname jobId
+        assertEqual "The job should complete after the callback failure" Job.Success jobStatus
+  where
+    configure cfg = cfg
+      { Job.cfgDefaultMaxAttempts = 1
+      , Job.cfgImmediateJobDeletion = const $ pure False
+      , Job.cfgOnJobStart = const $ throwString "onJobStart regression"
+      , Job.cfgPollingInterval = 0
+      }
+
+testJobSetupFailureDoesNotBlock jobPool = testCase "a worker setup failure does not block polling" $
+  withRandomTable jobPool $ \tname ->
+    Pool.withResource jobPool $ \conn -> do
+      Job{jobId} <- Job.createJob conn tname (PayloadSucceed 0)
+      threadsRef <- newIORef mempty
+      withConfig tname jobPool configure $ \_ cfg -> do
+        let monitorEnv = Job.RunnerEnv cfg threadsRef
+        started <- waitWithin "pollRunJob deadlocked after worker setup failed" 3000000 $
+          runReaderT (Job.pollRunJob "setup-failure-regression" Nothing) monitorEnv
+        case started of
+          Nothing -> assertFailure "Expected pollRunJob to find the queued job"
+          Just jobThread -> do
+            result <- waitCatch jobThread
+            assertBool "Expected the setup failure to escape the worker" $ case result of
+              Left _  -> True
+              Right _ -> False
+        Job{jobStatus} <- ensureJobId conn tname jobId
+        assertEqual "The job was locked before setup failed" Job.Locked jobStatus
+  where
+    configure cfg = cfg
+      { Job.cfgImmediateJobDeletion = const $ pure False
+      , Job.cfgLogger = \_ -> \case
+          Job.LogJobStart _ -> throwString "setup regression"
+          _ -> pure ()
+      , Job.cfgPollingInterval = 0
+      }
+
+testDontPollPacing jobPool = testCase "DontPoll waits for the polling interval" $
+  withRandomTable jobPool $ \tname -> do
+    evaluations <- newIORef (0 :: Int)
+    firstEvaluation <- newEmptyMVar
+    threadsRef <- newIORef mempty
+    let concurrencyCheck = do
+          modifyIORef' evaluations (+ 1)
+          void $ tryPutMVar firstEvaluation ()
+          pure False
+        configure cfg = cfg
+          { Job.cfgConcurrencyControl = Job.DynamicConcurrency concurrencyCheck
+          , Job.cfgPollingInterval = 1
+          }
+    withConfig tname jobPool configure $ \_ cfg -> do
+      let monitorEnv = Job.RunnerEnv cfg threadsRef
+      withAsync (runReaderT Job.jobPoller monitorEnv) $ \_ -> do
+        waitWithin "Concurrency control was not evaluated" 3000000 $ takeMVar firstEvaluation
+        threadDelay 100000
+        readIORef evaluations >>= assertEqual
+          "DontPoll should not busy-loop"
+          1
+
+testListenNotifyStartup appPool jobPool = testCase "LISTEN/NOTIFY starts jobs promptly and observes concurrency" $
+  withRandomTable jobPool $ \tname -> do
+    firstStarted <- newEmptyMVar
+    secondStarted <- newEmptyMVar
+    releaseFirst <- newEmptyMVar
+    startedCount <- newIORef (0 :: Int)
+    let blockingRunner _ = do
+          started <- atomicModifyIORef' startedCount $ \n -> let next = n + 1 in (next, next)
+          if started == 1
+            then putMVar firstStarted () >> takeMVar releaseFirst
+            else void $ tryPutMVar secondStarted ()
+        configure cfg = cfg
+          { Job.cfgConcurrencyControl = Job.MaxConcurrentJobs 1
+          , Job.cfgImmediateJobDeletion = const $ pure False
+          , Job.cfgJobRunner = blockingRunner
+          , Job.cfgPollingInterval = 30
+          }
+        listenerReady logs = flip DL.any logs $ \case
+          Job.LogText "Starting the job monitor via LISTEN/NOTIFY..." -> True
+          _ -> False
+
+    withConfig tname jobPool configure $ \logRef cfg ->
+      withAsync (Job.startJobRunner cfg) $ \_ ->
+        flip finally (void $ tryPutMVar releaseFirst ()) $ do
+          waitUntil "The LISTEN connection was not established" $
+            listenerReady <$> readIORef logRef
+          Pool.withResource appPool $ \conn -> do
+            firstJob <- Job.createJob conn tname (PayloadSucceed 0)
+            Timeout.timeout 3000000 (takeMVar firstStarted) >>= \case
+              Just () -> pure ()
+              Nothing -> do
+                logs <- readIORef logRef
+                assertFailure $ "LISTEN/NOTIFY did not start the immediate job. Logs: " <> show logs
+
+            secondJob <- Job.createJob conn tname (PayloadSucceed 0)
+            threadDelay 100000
+            tryReadMVar secondStarted >>= assertEqual
+              "LISTEN/NOTIFY exceeded MaxConcurrentJobs while the worker was starting"
+              Nothing
+            Job{jobStatus = secondStatus} <- ensureJobId conn tname (Job.jobId secondJob)
+            assertEqual "The second job should remain queued" Job.Queued secondStatus
+
+            putMVar releaseFirst ()
+            waitUntil "The first LISTEN/NOTIFY job did not finish" $ do
+              Job{jobStatus = firstStatus} <- ensureJobId conn tname (Job.jobId firstJob)
+              pure $ firstStatus == Job.Success
+
+testPollerListenerConcurrency appPool jobPool = testCase "poller and LISTEN/NOTIFY share one concurrency gate" $
+  withRandomTable jobPool $ \tname -> do
+    pollerEntered <- newEmptyMVar
+    releasePoller <- newEmptyMVar
+    firstStarted <- newEmptyMVar
+    secondStarted <- newEmptyMVar
+    releaseFirst <- newEmptyMVar
+    firstPoll <- newIORef True
+    startedCount <- newIORef (0 :: Int)
+    let blockingRunner _ = do
+          started <- atomicModifyIORef' startedCount $ \n -> let next = n + 1 in (next, next)
+          if started == 1
+            then putMVar firstStarted () >> takeMVar releaseFirst
+            else void $ tryPutMVar secondStarted ()
+        configure cfg = cfg
+          { Job.cfgConcurrencyControl = Job.MaxConcurrentJobs 1
+          , Job.cfgImmediateJobDeletion = const $ pure False
+          , Job.cfgJobRunner = blockingRunner
+          , Job.cfgPollingInterval = 30
+          }
+        listenerReady logs = flip DL.any logs $ \case
+          Job.LogText "Starting the job monitor via LISTEN/NOTIFY..." -> True
+          _ -> False
+        ignoredNotifications logs = DL.length (DL.filter isIgnoredNotification logs) >= 2
+        isIgnoredNotification = \case
+          Job.LogText "Received job event, but ignoring it due to concurrency control" -> True
+          _ -> False
+
+    withConfig tname jobPool configure $ \logRef baseConfig -> do
+      let originalLogger = Job.cfgLogger baseConfig
+          blockingLogger level event = do
+            originalLogger level event
+            case event of
+              Job.LogText message | "Polling the job queue.." `T.isInfixOf` message -> do
+                shouldBlock <- atomicModifyIORef' firstPoll $ \isFirst -> (False, isFirst)
+                when shouldBlock $ do
+                  putMVar pollerEntered ()
+                  takeMVar releasePoller
+              _ -> pure ()
+          config = baseConfig{Job.cfgLogger = blockingLogger}
+          releaseBlockedThreads = do
+            void $ tryPutMVar releasePoller ()
+            void $ tryPutMVar releaseFirst ()
+
+      withAsync (Job.startJobRunner config) $ \_ ->
+        flip finally releaseBlockedThreads $ do
+          waitUntil "The LISTEN connection was not established" $
+            listenerReady <$> readIORef logRef
+          waitWithin "The poller did not enter its lock/start section" 3000000 $
+            takeMVar pollerEntered
+
+          (firstJob, secondJob) <- Pool.withResource appPool $ \conn ->
+            (,) <$> Job.createJob conn tname (PayloadSucceed 0)
+                <*> Job.createJob conn tname (PayloadSucceed 0)
+
+          threadDelay 100000
+          putMVar releasePoller ()
+          waitWithin "Neither polling path started a job" 3000000 $
+            takeMVar firstStarted
+          waitUntil "The listener did not process both queued notifications" $
+            ignoredNotifications <$> readIORef logRef
+          tryReadMVar secondStarted >>= assertEqual
+            "The poller and listener exceeded their shared concurrency limit"
+            Nothing
+
+          Pool.withResource appPool $ \conn -> do
+            firstStatus <- Job.jobStatus <$> ensureJobId conn tname (Job.jobId firstJob)
+            secondStatus <- Job.jobStatus <$> ensureJobId conn tname (Job.jobId secondJob)
+            assertEqual "Exactly one job should be locked" 1 $
+              DL.length $ DL.filter (== Job.Locked) [firstStatus, secondStatus]
+            assertEqual "Exactly one job should remain queued" 1 $
+              DL.length $ DL.filter (== Job.Queued) [firstStatus, secondStatus]
+
+            putMVar releaseFirst ()
+            waitUntil "The running job did not complete" $ do
+              completedFirst <- Job.jobStatus <$> ensureJobId conn tname (Job.jobId firstJob)
+              completedSecond <- Job.jobStatus <$> ensureJobId conn tname (Job.jobId secondJob)
+              pure $ DL.length (DL.filter (== Job.Success) [completedFirst, completedSecond]) == 1
+
 data JobEvent = JobStart
               | JobRetry
               | JobSuccess
@@ -790,11 +1074,11 @@ payloadDelay jobPollingInterval = payloadDelay_ (Seconds 0)
     payloadDelay_ total p =
       let defaultDelay x = total + x + jobPollingInterval
       in case p of
-        PayloadAlwaysFail x -> defaultDelay x
-        PayloadSucceed x -> defaultDelay x
-        PayloadFail x ip -> payloadDelay_ (defaultDelay x) ip
+        PayloadAlwaysFail x           -> defaultDelay x
+        PayloadSucceed x              -> defaultDelay x
+        PayloadFail x ip              -> payloadDelay_ (defaultDelay x) ip
         PayloadThrowStringException _ -> defaultDelay 0
-        PayloadThrowDivideByZero -> defaultDelay 0
+        PayloadThrowDivideByZero      -> defaultDelay 0
 
 deriving instance Enum Time.Unit
 deriving instance Enum Time.Direction
@@ -854,11 +1138,11 @@ genFilter t = do
   createdAfter <- Gen.maybe (anyTimeGen t)
   createdBefore <- case createdAfter of
     Nothing -> Gen.maybe (anyTimeGen t)
-    Just x -> Gen.maybe (futureTimeGen x)
+    Just x  -> Gen.maybe (futureTimeGen x)
   updatedAfter  <- Gen.maybe (anyTimeGen t)
   updatedBefore  <- case updatedAfter of
     Nothing -> Gen.maybe (anyTimeGen t)
-    Just x -> Gen.maybe (futureTimeGen x)
+    Just x  -> Gen.maybe (futureTimeGen x)
   orderClause <- Gen.maybe ((,) <$> Gen.element (enumFrom Web.OrdCreatedAt) <*> Gen.element (enumFrom Web.Asc))
   limitOffset <- Gen.maybe ((,) <$> Gen.int (Range.constant 5 10) <*> Gen.int (Range.constant 0 30))
   runAfter <- Gen.maybe (futureTimeGen t)
@@ -891,16 +1175,16 @@ filterJobs Web.Filter{filterStatuses, filterCreatedAfter, filterCreatedBefore, f
       let comparer = resultOrder $ case fld of
             Web.OrdCreatedAt -> comparing jobCreatedAt
             Web.OrdUpdatedAt -> comparing jobUpdatedAt
-            Web.OrdLockedAt -> comparing jobLockedAt
-            Web.OrdStatus -> comparing jobStatus
-            Web.OrdJobType -> comparing Job.defaultJobType
+            Web.OrdLockedAt  -> comparing jobLockedAt
+            Web.OrdStatus    -> comparing jobStatus
+            Web.OrdJobType   -> comparing Job.defaultJobType
           resultOrder fn x y = case fn x y of
             EQ -> compare (Down $ jobId x) (Down $ jobId y)
             LT -> case dir of
-              Web.Asc -> LT
+              Web.Asc  -> LT
               Web.Desc -> GT
             GT -> case dir of
-              Web.Asc -> GT
+              Web.Asc  -> GT
               Web.Desc -> LT
       in sortBy comparer lst
 

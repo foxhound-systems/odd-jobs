@@ -1,29 +1,30 @@
+{-# LANGUAGE DeriveGeneric             #-}
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE RankNTypes                #-}
 
 module OddJobs.Types where
 
-import Database.PostgreSQL.Simple as PGS
-import Database.PostgreSQL.Simple.Types as PGS
-import UnliftIO (MonadIO)
-import UnliftIO.Concurrent (threadDelay)
-import Data.Text.Conversions
-import Database.PostgreSQL.Simple.FromField as FromField
-import Database.PostgreSQL.Simple.ToField as ToField
-import Database.PostgreSQL.Simple.FromRow as FromRow
-import Data.Time
-import UnliftIO.Exception
-import Data.Text (Text)
-import GHC.Generics
-import Data.Aeson as Aeson hiding (Success)
-import Data.String.Conv
-import Lucid (Html)
-import Data.Pool (Pool)
-import Control.Monad.Logger (LogLevel)
-import Data.Int (Int64)
+import           Control.Monad.Logger                 ( LogLevel )
+import           Data.Aeson                           as Aeson hiding
+                                                               ( Success )
+import           Data.Int                             ( Int64 )
+import           Data.Pool                            ( Pool )
+import           Data.String.Conv
+import           Data.Text                            ( Text )
+import           Data.Text.Conversions
+import           Data.Time
+import           Database.PostgreSQL.Simple           as PGS
+import           Database.PostgreSQL.Simple.FromField as FromField
+import           Database.PostgreSQL.Simple.FromRow   as FromRow
+import           Database.PostgreSQL.Simple.ToField   as ToField
+import           Database.PostgreSQL.Simple.Types     as PGS
+import           GHC.Generics
+import           Lucid                                ( Html )
+import           UnliftIO                             ( MonadIO )
+import           UnliftIO.Concurrent                  ( threadDelay )
+import           UnliftIO.Exception
 
 -- | An alias for 'QualifiedIdentifier' type. It is used for the job table name.
 -- Since this type has an instance of 'IsString',
@@ -49,8 +50,11 @@ import Data.Int (Int64)
 type TableName = PGS.QualifiedIdentifier
 
 pgEventName :: TableName -> PGS.Identifier
-pgEventName (PGS.QualifiedIdentifier Nothing tname) = PGS.Identifier $ "jobs_created_" <> tname
-pgEventName (PGS.QualifiedIdentifier (Just schema) tname) = PGS.Identifier $ "jobs_created_" <> schema <> "_" <> tname
+pgEventName = PGS.Identifier . pgEventNameText
+
+pgEventNameText :: TableName -> Text
+pgEventNameText (PGS.QualifiedIdentifier Nothing tname) = "jobs_created_" <> tname
+pgEventNameText (PGS.QualifiedIdentifier (Just schema) tname) = "jobs_created_" <> schema <> "_" <> tname
 
 newtype Seconds = Seconds { unSeconds :: Int } deriving (Eq, Show, Ord, Num, Read)
 
@@ -120,11 +124,11 @@ data JobErrHandler = forall a e . (Exception e) => JobErrHandler (e -> Job -> Fa
 type FunctionName = PGS.Identifier
 
 data ResourceCfg = ResourceCfg
-  { resCfgResourceTable :: TableName
+  { resCfgResourceTable         :: TableName
   -- ^ Table to use for tracking resources and their limits. Both this and
   -- 'resCfgUsageTable' should be created by 'OddJobs.Migrations.createResourceTables'.
 
-  , resCfgUsageTable :: TableName
+  , resCfgUsageTable            :: TableName
   -- ^ Table to use for tracking how jobs use resources.
 
   , resCfgCheckResourceFunction :: FunctionName
@@ -134,7 +138,7 @@ data ResourceCfg = ResourceCfg
   -- function should have the signature @(int) RETURNS bool@, and return @TRUE@
   -- if the job with the given ID has its resources available.
 
-  , resCfgDefaultLimit :: Int
+  , resCfgDefaultLimit          :: Int
   -- ^ When a job requires a resource not already in 'resCfgResourceTable',
   -- what should its limit be set to?
   } deriving (Show)
@@ -174,10 +178,10 @@ data ConcurrencyControl
 
 instance Show ConcurrencyControl where
   show cc = case cc of
-    MaxConcurrentJobs n -> "MaxConcurrentJobs " <> show n
+    MaxConcurrentJobs n     -> "MaxConcurrentJobs " <> show n
     UnlimitedConcurrentJobs -> "UnlimitedConcurrentJobs"
-    ResourceLimits cfg -> "ResourceLimits " <> show cfg
-    DynamicConcurrency _ -> "DynamicConcurrency (IO Bool)"
+    ResourceLimits cfg      -> "ResourceLimits " <> show cfg
+    DynamicConcurrency _    -> "DynamicConcurrency (IO Bool)"
 
 type JobId = Int
 
@@ -213,43 +217,43 @@ instance ToJSON Status where
 instance FromJSON Status where
   parseJSON = withText "Expecting text to convert into Job.Status" $ \t -> do
     case (fromText t :: Either String Status) of
-      Left e -> fail e
+      Left e  -> fail e
       Right r -> pure r
 
 
 newtype JobRunnerName = JobRunnerName { unJobRunnerName :: Text } deriving (Eq, Show, FromField, ToField, Generic, ToJSON, FromJSON)
 
 data Job = Job
-  { jobId :: JobId
+  { jobId        :: JobId
   , jobCreatedAt :: UTCTime
   , jobUpdatedAt :: UTCTime
-  , jobRunAt :: UTCTime
-  , jobStatus :: Status
-  , jobPayload :: Aeson.Value
+  , jobRunAt     :: UTCTime
+  , jobStatus    :: Status
+  , jobPayload   :: Aeson.Value
   , jobLastError :: Maybe Value
-  , jobAttempts :: Int
-  , jobLockedAt :: Maybe UTCTime
-  , jobLockedBy :: Maybe JobRunnerName
+  , jobAttempts  :: Int
+  , jobLockedAt  :: Maybe UTCTime
+  , jobLockedBy  :: Maybe JobRunnerName
   } deriving (Eq, Show, Generic)
 
 instance ToText Status where
   toText s = case s of
-    Success -> "success"
-    Queued -> "queued"
-    Retry -> "retry"
-    Failed -> "failed"
+    Success   -> "success"
+    Queued    -> "queued"
+    Retry     -> "retry"
+    Failed    -> "failed"
     Cancelled -> "cancelled"
-    Locked -> "locked"
+    Locked    -> "locked"
 
 instance (StringConv Text a) => FromText (Either a Status) where
   fromText t = case t of
-    "success" -> Right Success
-    "queued" -> Right Queued
-    "failed" -> Right Failed
+    "success"   -> Right Success
+    "queued"    -> Right Queued
+    "failed"    -> Right Failed
     "cancelled" -> Right Cancelled
-    "retry" -> Right Retry
-    "locked" -> Right Locked
-    x -> Left $ toS $ "Unknown job status: " <> x
+    "retry"     -> Right Retry
+    "locked"    -> Right Locked
+    x           -> Left $ toS $ "Unknown job status: " <> x
 
 instance FromField Status where
   fromField f mBS = fromField f mBS >>= (\case
@@ -306,20 +310,20 @@ data AllJobTypes
 data Config = Config
   { -- | The DB table which holds your jobs. Please note, this should have been
     -- created by the 'OddJobs.Migrations.createJobTable' function.
-    cfgTableName :: TableName
+    cfgTableName            :: TableName
 
     -- | The actualy "job-runner" that __you__ need to provide. If this function
     -- throws a runtime exception, the job will be retried
     -- 'cfgDefaultMaxAttempts' times. Please look at the examples/tutorials if
     -- your applicaton's code is not in the @IO@ monad.
-  , cfgJobRunner :: Job -> IO ()
+  , cfgJobRunner            :: Job -> IO ()
 
     -- | The number of times a failing job is retried before it is considered is
     -- "permanently failed" and ignored by the job-runner. This config parameter
     -- is called "/default/ max attempts" because, in the future, it would be
     -- possible to specify the number of retry-attemps on a per-job basis
     -- (__Note:__ per-job retry-attempts has not been implemented yet)
-  , cfgDefaultMaxAttempts :: Int
+  , cfgDefaultMaxAttempts   :: Int
 
     -- | Controls how many jobs can be run concurrently by /this instance/ of
     -- the job-runner. __Please note,__ this is NOT the global concurrency of
@@ -328,37 +332,37 @@ data Config = Config
     -- job-runners. __Ref:__ Section on [controllng
     -- concurrency](https://www.haskelltutorials.com/odd-jobs/guide.html#controlling-concurrency)
     -- in the implementtion guide.
-  , cfgConcurrencyControl :: ConcurrencyControl
+  , cfgConcurrencyControl   :: ConcurrencyControl
 
     -- | The DB connection-pool to use for the job-runner. __Note:__ in case
     -- your jobs require a DB connection, please create a separate
     -- connection-pool for them. This pool will be used ONLY for monitoring jobs
     -- and changing their status. We need to have __at least 4 connections__ in
     -- this connection-pool for the job-runner to work as expected.
-  , cfgDbPool :: Pool Connection
+  , cfgDbPool               :: Pool Connection
 
     -- | How frequently should the 'jobPoller' check for jobs where the Job's
     -- 'jobRunAt' field indicates that it's time for the job to be executed.
     -- __Ref:__ Please read the section on [how Odd Jobs works
     -- (architecture)](https://www.haskelltutorials.com/odd-jobs/guide.html#architecture)
     -- to find out more.
-  , cfgPollingInterval :: Seconds
+  , cfgPollingInterval      :: Seconds
 
   -- | User-defined callback function that is called whenever a job succeeds.
-  , cfgOnJobSuccess :: Job -> IO ()
+  , cfgOnJobSuccess         :: Job -> IO ()
 
   -- | User-defined error-handler that is called whenever a job fails (indicated
   -- by 'cfgJobRunner' throwing an unhandled runtime exception). Please refer to
   -- 'JobErrHandler' for documentation on how to use this.
-  , cfgOnJobFailed :: [JobErrHandler]
+  , cfgOnJobFailed          :: [JobErrHandler]
 
   -- | User-defined callback function that is called whenever a job starts
   -- execution.
-  , cfgOnJobStart :: Job -> IO ()
+  , cfgOnJobStart           :: Job -> IO ()
 
   -- | User-defined callback function that is called whenever a job times-out.
   -- Also check 'cfgDefaultJobTimeout'
-  , cfgOnJobTimeout :: Job -> IO ()
+  , cfgOnJobTimeout         :: Job -> IO ()
 
   -- | File to store the PID of the job-runner process. This is used only when
   -- invoking the job-runner as an independent background deemon (the usual mode
@@ -372,24 +376,24 @@ data Config = Config
   -- __Note:__ Please take a look at the section on [structured
   -- logging](https://www.haskelltutorials.com/odd-jobs/guide.html#structured-logging)
   -- to find out how to use this to log in JSON.
-  , cfgLogger :: LogLevel -> LogEvent -> IO ()
+  , cfgLogger               :: LogLevel -> LogEvent -> IO ()
 
   -- | How to extract the "job type" from a 'Job'. If you are overriding this,
   -- please consider overriding 'cfgJobTypeSql' as well. Related:
   -- 'OddJobs.ConfigBuilder.defaultJobType'
-  , cfgJobType :: Job -> Text
+  , cfgJobType              :: Job -> Text
 
     -- | How long can a job run after which it is considered to be "crashed" and
     -- picked up for execution again
-  , cfgDefaultJobTimeout :: Seconds
+  , cfgDefaultJobTimeout    :: Seconds
 
     -- | After a job attempt, should it be immediately deleted to save table space? The default
     -- behaviour, as defined by 'OddJobs.ConfigBuilder.defaultImmediateJobDeletion' is to delete
-    -- successful jobs immediately (and retain everything else). If you are providing your 
+    -- successful jobs immediately (and retain everything else). If you are providing your
     -- own implementation here, __be careful__ to check for the job's status before deciding
     -- whether to delete it, or not.
     --
-    -- A /possible/ use-case for non-successful jobs could be check the 'jobResult' for a failed job 
+    -- A /possible/ use-case for non-successful jobs could be check the 'jobResult' for a failed job
     -- and depending up on the 'jobResult' decide if there is no use retrying it, and if it should be
     -- immediately deleted.
   , cfgImmediateJobDeletion :: Job -> IO Bool
@@ -399,7 +403,7 @@ data Config = Config
     -- successful jobs whose deletion has been delayed via a custom 'cfgImmediateJobDeletion' function).
     --
     -- Ref: 'OddJobs.ConfigBuilder.defaultDelayedJobDeletionSql'
-  , cfgDelayedJobDeletion :: Maybe (PGS.Connection -> IO Int64)
+  , cfgDelayedJobDeletion   :: Maybe (PGS.Connection -> IO Int64)
 
     -- | How far into the future should jobs which can be retried be queued for?
     --
@@ -407,14 +411,14 @@ data Config = Config
     -- always be at least 1, since the job will have to have started at least once
     -- in order to fail and be retried. The default implementation is an exponential
     -- backoff of @'Seconds' $ 2 ^ 'jobAttempts'@.
-  , cfgDefaultRetryBackoff :: Int -> IO Seconds
+  , cfgDefaultRetryBackoff  :: Int -> IO Seconds
   }
 
 
 data UIConfig = UIConfig
   { -- | The DB table which holds your jobs. Please note, this should have been
     -- created by the 'OddJobs.Migrations.createJobTable' function.
-    uicfgTableName :: TableName
+    uicfgTableName   :: TableName
 
     -- | The DB connection-pool to use for the web UI. __Note:__ the same DB
     -- pool used by your job-runner can be passed here if it has a sufficient
@@ -422,13 +426,13 @@ data UIConfig = UIConfig
     -- DB pool to be used only by the web UI (this DB pool can have just 1-3
     -- connection, because __typically__ the web UI doesn't serve too many
     -- concurrent user in most real-life cases)
-  , uicfgDbPool :: Pool Connection
+  , uicfgDbPool      :: Pool Connection
 
     -- | How to extract the "job type" from a 'Job'. If you are overriding this,
     -- please consider overriding 'cfgJobTypeSql' as well. __Note:__ Usually
     -- 'cfgJobType' and 'uicfgJobType' would use the same value. Related:
     -- 'OddJobs.ConfigBuilder.defaultJobType'
-  , uicfgJobType :: Job -> Text
+  , uicfgJobType     :: Job -> Text
 
     -- | How to extract the \"job type\" directly in SQL. There are many places,
     -- especially in the web\/admin UI, where we need to know a job's type
@@ -436,7 +440,7 @@ data UIConfig = UIConfig
     -- Haskell, and then parsing it into JSON, and then applying the
     -- 'cfgJobType' function on it would be too inefficient). Ref:
     -- 'OddJobs.ConfigBuilder.defaultJobTypeSql' and 'uicfgJobType'
-  , uicfgJobTypeSql :: PGS.Query
+  , uicfgJobTypeSql  :: PGS.Query
 
     -- | How to convert a list of 'Job's to a list of HTML fragments. This is
     -- used in the Web\/Admin UI. This function accepts a /list/ of jobs and
@@ -444,7 +448,7 @@ data UIConfig = UIConfig
     -- another table to fetch some metadata (eg. convert a primary-key to a
     -- human-readable name), you can do it efficiently instead of resulting in
     -- an N+1 SQL bug. Ref: 'defaultJobToHtml'
-  , uicfgJobToHtml :: [Job] -> IO [Html ()]
+  , uicfgJobToHtml   :: [Job] -> IO [Html ()]
 
     -- | How to get a list of all known job-types? This is used by the
     -- Web\/Admin UI to power the \"filter by job-type\" functionality. The
@@ -460,5 +464,5 @@ data UIConfig = UIConfig
     -- __Note:__ Please take a look at the section on [structured
     -- logging](https://www.haskelltutorials.com/odd-jobs/guide.html#structured-logging)
     -- to find out how to use this to log in JSON.
-  , uicfgLogger :: LogLevel -> LogEvent -> IO ()
+  , uicfgLogger      :: LogLevel -> LogEvent -> IO ()
   }

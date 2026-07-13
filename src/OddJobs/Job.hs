@@ -1,5 +1,12 @@
-{-# LANGUAGE RankNTypes, FlexibleInstances, FlexibleContexts, PartialTypeSignatures, UndecidableInstances #-}
-{-# LANGUAGE ExistentialQuantification, RecordWildCards, ScopedTypeVariables, CPP #-}
+{-# LANGUAGE CPP                       #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE PartialTypeSignatures     #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE RecordWildCards           #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE UndecidableInstances      #-}
 
 module OddJobs.Job
   (
@@ -82,59 +89,73 @@ module OddJobs.Job
   )
 where
 
-import OddJobs.Types
-import qualified Data.Pool as Pool
-import Data.Pool(Pool)
-import qualified Data.Text as T
-import Database.PostgreSQL.Simple as PGS
-import Database.PostgreSQL.Simple.Notification
-import UnliftIO.Async hiding (poll)
-import UnliftIO.Concurrent (threadDelay, myThreadId)
-import Data.String
-import System.Posix.Process (getProcessID)
-import Network.HostName (getHostName)
-import UnliftIO.MVar
-import Debug.Trace
-import Control.Monad.Logger as MLogger (LogLevel(..), LogStr, toLogStr)
-import UnliftIO.IORef
-import UnliftIO.Exception ( SomeException(..), try, catch, finally
-                          , catchAny, bracket, Exception(..), throwIO
-                          , catches, Handler(..), mask_, onException
-                          , throwString
-                          )
-import Data.Proxy
-import Control.Monad.Trans.Control
-import Control.Monad.IO.Unlift (MonadUnliftIO, withRunInIO, liftIO)
-import Data.Text.Conversions
-import Data.Time
-import Data.Aeson hiding (Success)
-import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Types as Aeson (Parser, parseMaybe)
-import Data.String.Conv (StringConv(..), toS)
-import Data.Functor ((<&>), void)
-import Control.Monad (forever, forM_, join)
-import Data.Maybe (isNothing, maybe, fromMaybe, listToMaybe, mapMaybe, maybeToList)
-import Data.Either (either)
-import Control.Monad.Reader
-import GHC.Generics
-import Data.Map (Map)
-import qualified Data.HashMap.Strict as HM
-import qualified Data.List as DL
-import qualified Data.Map as DM
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
-import System.FilePath (FilePath)
-import qualified System.Directory as Dir
-import Prelude hiding (log)
-import GHC.Exts (toList)
-import Database.PostgreSQL.Simple.Types as PGS (Identifier(..))
-import Database.PostgreSQL.Simple.ToField as PGS (toField)
-import OddJobs.Job.Query
-import Data.Int (Int64)
+import           Control.Monad                           ( forM_, forever,
+                                                           join )
+import           Control.Monad.IO.Unlift                 ( MonadUnliftIO,
+                                                           liftIO, withRunInIO )
+import           Control.Monad.Logger                    as MLogger ( LogLevel (..),
+                                                                      LogStr,
+                                                                      toLogStr )
+import           Control.Monad.Reader
+import           Control.Monad.Trans.Control
+import           Data.Aeson                              hiding ( Success )
+import qualified Data.Aeson                              as Aeson
+import qualified Data.Aeson.Types                        as Aeson ( Parser,
+                                                                    parseMaybe )
+import qualified Data.ByteString                         as BS
+import qualified Data.ByteString.Lazy                    as BSL
+import           Data.Either                             ( either )
+import           Data.Functor                            ( void, (<&>) )
+import qualified Data.HashMap.Strict                     as HM
+import           Data.Int                                ( Int64 )
+import qualified Data.List                               as DL
+import           Data.Map                                ( Map )
+import qualified Data.Map                                as DM
+import           Data.Maybe                              ( fromMaybe, isNothing,
+                                                           listToMaybe,
+                                                           mapMaybe, maybe,
+                                                           maybeToList )
+import           Data.Pool                               ( Pool )
+import qualified Data.Pool                               as Pool
+import           Data.Proxy
+import           Data.String
+import           Data.String.Conv                        ( StringConv (..),
+                                                           toS )
+import qualified Data.Text                               as T
+import           Data.Text.Conversions
+import           Data.Time
+import           Database.PostgreSQL.Simple              as PGS
+import           Database.PostgreSQL.Simple.Notification
+import           Database.PostgreSQL.Simple.ToField      as PGS ( toField )
+import           Database.PostgreSQL.Simple.Types        as PGS ( Identifier (..) )
+import           Debug.Trace
+import           GHC.Exts                                ( toList )
+import           GHC.Generics
+import           Network.HostName                        ( getHostName )
+import           OddJobs.Job.Query
+import           OddJobs.Types
+import           Prelude                                 hiding ( log )
+import qualified System.Directory                        as Dir
+import           System.FilePath                         ( FilePath )
+import           System.Posix.Process                    ( getProcessID )
+import           UnliftIO.Async                          hiding ( poll )
+import           UnliftIO.Concurrent                     ( myThreadId,
+                                                           threadDelay )
+import           UnliftIO.Exception                      ( Exception (..),
+                                                           Handler (..),
+                                                           SomeException (..),
+                                                           bracket, catch,
+                                                           catchAny, catches,
+                                                           finally, mask_,
+                                                           onException, throwIO,
+                                                           throwString, try )
+import           UnliftIO.IORef
+import           UnliftIO.MVar
 #if MIN_VERSION_aeson(2,2,0)
-import Data.Aeson.Types
+import           Data.Aeson.Types
 #else
-import Data.Aeson.Internal (iparse, IResult(..), formatError)
+import           Data.Aeson.Internal                     ( IResult (..),
+                                                           formatError, iparse )
 #endif
 
 -- | The documentation of odd-jobs currently promotes 'startJobRunner', which
@@ -178,7 +199,7 @@ class (MonadUnliftIO m, MonadBaseControl IO m) => HasJobRunner m where
 
 
 data RunnerEnv = RunnerEnv
-  { envConfig :: !Config
+  { envConfig        :: !Config
   , envJobThreadsRef :: !(IORef (Map JobId (Async ())))
   }
 
@@ -350,7 +371,7 @@ updateJobHelper tname conn (newStatus, existingStates, mRunAt, jid) =
     q = "update ? set attempts=0, status=?, run_at=? where id=? and status in ? returning " <> concatJobDbColumns
     runAt = case mRunAt of
       Nothing -> PGS.toField $ PGS.Identifier "run_at"
-      Just t -> PGS.toField t
+      Just t  -> PGS.toField t
 
 
 data TimeoutException = TimeoutException deriving (Eq, Show)
@@ -360,10 +381,11 @@ instance Exception TimeoutException
 --   also spawns a monitoring thread, whichever finishes
 --   first kills the other.
 runJobWithTimeout :: (HasJobRunner m)
-                  => Seconds
+                  => MVar ()
+                  -> Seconds
                   -> Job
                   -> m ()
-runJobWithTimeout timeoutSec job@Job{jobId} = do
+runJobWithTimeout ready timeoutSec job@Job{jobId} = do
   threadsRef <- envJobThreadsRef <$> getRunnerEnv
   jobRunner_ <- getJobRunner
 
@@ -373,6 +395,8 @@ runJobWithTimeout timeoutSec job@Job{jobId} = do
     ( DM.insert jobId a threads
     , DL.map asyncThreadId $ DM.elems $ DM.insert jobId a threads
     )
+
+  void $ tryPutMVar ready ()
 
   -- liftIO $ putStrLn $ "Threads: " <> show x
   log LevelDebug $ LogText $ toS $ "Spawned job in " <> show (asyncThreadId a)
@@ -387,27 +411,28 @@ runJobWithTimeout timeoutSec job@Job{jobId} = do
 
 
 -- | runs a job, blocks for as long as it's in progress
-runJob :: (HasJobRunner m) => JobId -> m ()
-runJob jid = do
-  findJobById jid >>= \case
-    Nothing -> Prelude.error $ "Could not find job id=" <> show jid
-    Just job -> do
-      startTime <- liftIO getCurrentTime
-      lockTimeout <- getDefaultJobTimeout
-      log LevelInfo $ LogJobStart job
-      flip catch (exceptionHandler job startTime) $ do
-        onJobStart job
-        runJobWithTimeout lockTimeout job
-        endTime <- liftIO getCurrentTime
-        let newJob = job{jobStatus=OddJobs.Types.Success, jobLockedBy=Nothing, jobLockedAt=Nothing, jobUpdatedAt = endTime}
-        shouldDeleteJob <- immediateJobDeletion >>= (\fn -> liftIO $ fn newJob)
-        if shouldDeleteJob
-          then deleteJob jid
-          else void $ saveJob newJob
-        log LevelInfo $ LogJobSuccess newJob (diffUTCTime endTime startTime)
-        onJobSuccess newJob
-        pure ()
+runJob :: (HasJobRunner m) => MVar () -> JobId -> m ()
+runJob ready jid = finally run $ void $ tryPutMVar ready ()
   where
+    run = findJobById jid >>= \case
+      Nothing -> Prelude.error $ "Could not find job id=" <> show jid
+      Just job -> do
+        startTime <- liftIO getCurrentTime
+        lockTimeout <- getDefaultJobTimeout
+        log LevelInfo $ LogJobStart job
+        flip catch (exceptionHandler job startTime) $ do
+          onJobStart job
+          runJobWithTimeout ready lockTimeout job
+          endTime <- liftIO getCurrentTime
+          let newJob = job{jobStatus=OddJobs.Types.Success, jobLockedBy=Nothing, jobLockedAt=Nothing, jobUpdatedAt = endTime}
+          shouldDeleteJob <- immediateJobDeletion >>= (\fn -> liftIO $ fn newJob)
+          if shouldDeleteJob
+            then deleteJob jid
+            else void $ saveJob newJob
+          log LevelInfo $ LogJobSuccess newJob (diffUTCTime endTime startTime)
+          onJobSuccess newJob
+          pure ()
+
     exceptionHandler job startTime (e :: SomeException) = retryOrFail (toException e) job startTime
     retryOrFail e job@Job{jobAttempts} startTime = do
       endTime <- liftIO getCurrentTime
@@ -438,6 +463,13 @@ runJob jid = do
           onJobTimeout newJob
 
       pure ()
+
+startJob :: (HasJobRunner m) => JobId -> m (Async ())
+startJob jid = do
+  ready <- newEmptyMVar
+  jobThread <- async $ runJob ready jid
+  takeMVar ready
+  pure jobThread
 
 killJob :: (HasJobRunner m) => JobId -> m ()
 killJob jid = do
@@ -479,8 +511,9 @@ restartUponCrash name_ action = do
 -- executed to finish execution before exiting the main thread.
 jobMonitor :: forall m . (HasJobRunner m) => m ()
 jobMonitor = do
-  a1 <- async $ restartUponCrash "Job poller" jobPoller
-  a2 <- async $ restartUponCrash "Job event listener" jobEventListener
+  startGate <- newMVar ()
+  a1 <- async $ restartUponCrash "Job poller" $ jobPollerWithGate startGate
+  a2 <- async $ restartUponCrash "Job event listener" $ jobEventListenerWithGate startGate
   a3 <- async $ restartUponCrash "Job Kill poller" killJobPoller
   a4 <- delayedJobDeletion >>= \case
     Nothing -> pure Nothing
@@ -555,17 +588,27 @@ jobPollingIO pollerDbConn processName tname lockTimeout = do
 --         because the thread/process executing it crashed without being able to
 --         update the DB)
 jobPoller :: (HasJobRunner m) => m ()
-jobPoller = do
+jobPoller = newMVar () >>= jobPollerWithGate
+
+jobPollerWithGate :: (HasJobRunner m) => MVar () -> m ()
+jobPollerWithGate startGate = do
   processName <- liftIO jobWorkerName
   log LevelInfo $ LogText $ toS $ "Starting the job monitor via DB polling with processName=" <> processName
   concurrencyControlFn <- getConcurrencyControlFn
   pool <- getDbPool
   forever $ do
-    concurencyPolicy <- withResource pool concurrencyControlFn
-    case concurencyPolicy of
-      DontPoll -> log LevelDebug $ LogText "NOT polling the job queue due to concurrency control"
-      PollAny -> void $ pollRunJob processName Nothing
-      PollWithResources resCfg -> void $ pollRunJob processName (Just resCfg)
+    pollResult <- withMVar startGate $ \_ -> do
+      concurencyPolicy <- withResource pool concurrencyControlFn
+      case concurencyPolicy of
+        DontPoll -> pure Nothing
+        PollAny -> fmap Just $ pollRunJobOnce processName Nothing
+        PollWithResources resCfg -> fmap Just $ pollRunJobOnce processName (Just resCfg)
+    case pollResult of
+      Nothing -> do
+        log LevelDebug $ LogText "NOT polling the job queue due to concurrency control"
+        delaySeconds =<< getPollingInterval
+      Just Nothing -> delaySeconds =<< getPollingInterval
+      Just (Just _) -> pure ()
 
 -- | Polls a job and runs it, or executes a delay action if no job was found
 --
@@ -573,6 +616,14 @@ jobPoller = do
 --   to block until it's finished
 pollRunJob :: (HasJobRunner m) => String -> Maybe ResourceCfg -> m (Maybe (Async ()))
 pollRunJob processName mResCfg = do
+  result <- pollRunJobOnce processName mResCfg
+  case result of
+    Nothing -> delaySeconds =<< getPollingInterval
+    Just _  -> pure ()
+  pure result
+
+pollRunJobOnce :: (HasJobRunner m) => String -> Maybe ResourceCfg -> m (Maybe (Async ()))
+pollRunJobOnce processName mResCfg = do
     tname <- getTableName
     -- note it's better to use fine grained pool connection,
     -- since data.pool already has it's internal resource cache.
@@ -580,7 +631,7 @@ pollRunJob processName mResCfg = do
     -- needs to remain open.
     pool <- getDbPool
     lockTimeout <- getDefaultJobTimeout
-    join $ withResource pool $ \pollerDbConn -> mask_ $ do
+    withResource pool $ \pollerDbConn -> mask_ $ do
       log LevelDebug $ LogText $ toS $ "[" <> processName <> "] Polling the job queue.."
       t <- liftIO getCurrentTime
       r <- case mResCfg of
@@ -609,18 +660,13 @@ pollRunJob processName mResCfg = do
            , resCfgCheckResourceFunction
            )
       case r of
-        -- When we don't have any jobs to run, we can relax a bit...
-        [] -> pure (Nothing <$ delayAction)
+        [] -> pure Nothing
 
-        -- When we find a job to run, fork and try to find the next job without any delay...
         [Only (jid :: JobId)] -> do
-          x <- async $ runJob jid
-          pure $ Just x <$ noDelayAction
+          x <- startJob jid
+          pure $ Just x
 
         x -> error $ "WTF just happened? I was supposed to get only a single row, but got: " ++ show x
-  where
-    delayAction = delaySeconds =<< getPollingInterval
-    noDelayAction = pure ()
 
 -- | Executes 'killJobPollingSql' every 'cfgPollingInterval' seconds to pick up jobs
 -- that are cancelled and need to be killed. Uses @UPDATE@ along with @SELECT...
@@ -663,8 +709,10 @@ killJobPoller = do
 -- jobs.
 jobEventListener :: (HasJobRunner m)
                  => m ()
-jobEventListener = do
-  log LevelInfo $ LogText "Starting the job monitor via LISTEN/NOTIFY..."
+jobEventListener = newMVar () >>= jobEventListenerWithGate
+
+jobEventListenerWithGate :: (HasJobRunner m) => MVar () -> m ()
+jobEventListenerWithGate startGate = do
   pool <- getDbPool
   tname <- getTableName
   jwName <- liftIO jobWorkerName
@@ -686,6 +734,7 @@ jobEventListener = do
 
   withResource pool $ \monitorDbConn -> do
     void $ liftIO $ PGS.execute monitorDbConn "LISTEN ?" (Only $ pgEventName tname)
+    log LevelInfo $ LogText "Starting the job monitor via LISTEN/NOTIFY..."
     forever $ do
       log LevelDebug $ LogText "[LISTEN/NOTIFY] Event loop"
       notif <- liftIO $ getNotification monitorDbConn
@@ -705,18 +754,18 @@ jobEventListener = do
                   t <- liftIO getCurrentTime
                   if (runAt_ <= t) && isNothing mLockedAt_
                     then do log LevelDebug $ LogText $ toS $ "Job needs needs to be run immediately. Attempting to fork in background. JobId=" <> show jid
-                            void $ async $ do
-                              -- Let's try to lock the job first... it is possible that it has already
-                              -- been picked up by the poller by the time we get here.
-                              tryLockingJob jid mResCfg >>= \case
-                                Nothing -> pure ()
-                                Just lockedJid -> runJob lockedJid
+                            -- Let's try to lock the job first... it is possible that it has already
+                            -- been picked up by the poller by the time we get here.
+                            tryLockingJob jid mResCfg >>= \case
+                              Nothing -> pure ()
+                              Just lockedJid -> void $ startJob lockedJid
                     else log LevelDebug $ LogText $ toS $ "Job is either for future, is already locked, or would violate concurrency constraints. Skipping. JobId=" <> show jid
 
-      concurrencyControlFn monitorDbConn >>= \case
-        DontPoll -> log LevelWarn $ LogText "Received job event, but ignoring it due to concurrency control"
-        PollAny -> runNotifWithFilter Nothing
-        PollWithResources resCfg -> runNotifWithFilter (Just resCfg)
+      withMVar startGate $ \_ ->
+        concurrencyControlFn monitorDbConn >>= \case
+          DontPoll -> log LevelWarn $ LogText "Received job event, but ignoring it due to concurrency control"
+          PollAny -> runNotifWithFilter Nothing
+          PollWithResources resCfg -> runNotifWithFilter (Just resCfg)
   where
     parser :: Value -> Aeson.Parser (JobId, UTCTime, Maybe UTCTime)
     parser = withObject "expecting an object to parse job.run_at and job.locked_at" $ \o -> do
@@ -847,7 +896,7 @@ eitherParsePayloadWith parser Job{jobPayload} = do
   case iparse parser jobPayload of
     -- TODO: throw a custom exception so that error reporting is better
     IError jpath e -> Left $ formatError jpath e
-    ISuccess r -> Right r
+    ISuccess r     -> Right r
 
 throwParsePayloadWith :: (Aeson.Value -> Aeson.Parser a)
                       -> Job
@@ -864,7 +913,7 @@ fetchAllJobTypes :: (MonadIO m)
 fetchAllJobTypes UIConfig{uicfgAllJobTypes, uicfgDbPool} = liftIO $ do
   case uicfgAllJobTypes of
     AJTFixed jts -> pure jts
-    AJTSql fn -> withResource uicfgDbPool fn
+    AJTSql fn    -> withResource uicfgDbPool fn
     AJTCustom fn -> fn
 
 -- | Used by web\/admin IO to fetch a \"master list\" of all known job-runners.

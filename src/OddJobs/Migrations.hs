@@ -5,10 +5,10 @@ module OddJobs.Migrations
   )
 where
 
-import Database.PostgreSQL.Simple as PGS
-import Database.PostgreSQL.Simple.Types as PGS
-import Data.Functor (void)
-import OddJobs.Types
+import           Data.Functor                     ( void )
+import           Database.PostgreSQL.Simple       as PGS
+import           Database.PostgreSQL.Simple.Types as PGS
+import           OddJobs.Types
 
 createJobTableQuery :: Query
 createJobTableQuery = "CREATE TABLE IF NOT EXISTS ?" <>
@@ -36,7 +36,7 @@ createJobTableQuery = "CREATE TABLE IF NOT EXISTS ?" <>
 createNotificationTrigger :: Query
 createNotificationTrigger = "create or replace function ?() returns trigger as $$" <>
   "begin \n" <>
-  "  perform pg_notify('?', \n" <>
+  "  perform pg_notify(?, \n" <>
   "    json_build_object('id', new.id, 'run_at', new.run_at, 'locked_at', new.locked_at)::text); \n" <>
   "  return new; \n" <>
   "end; \n" <>
@@ -64,7 +64,7 @@ createJobTable conn tname = void $ do
     )
   PGS.execute conn createNotificationTrigger
     ( fnName
-    , pgEventName tname
+    , pgEventNameText tname
     , trgName
     , tname
     , trgName
